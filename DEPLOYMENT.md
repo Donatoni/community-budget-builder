@@ -91,7 +91,7 @@ For local work, the same runtime values go in `.env.local` (Vite) and `.dev.vars
    url: 'https://budget.example.gov/',
    ```
 
-   If you do not have a custom domain yet, use `https://<your-project>.pages.dev/` for now and change it in [Step 8](#step-8-custom-domain-canonical-url-and-search-engines). The test suite asserts DeLand's address in `tests/seo.test.js`; update that assertion at the same time or the build will stop (see [Troubleshooting](#troubleshooting)).
+   If you do not have a custom domain yet, use `https://<your-project>.pages.dev/` for now and change it in [Step 8](#step-8-custom-domain-canonical-url-and-search-engines). The tests read this address from `src/seo.js`, so they need no change; they only require a bare `https://` origin ending in `/`.
 4. Check that the tests and the build pass locally:
 
    ```bash
@@ -389,7 +389,7 @@ To keep your own backup of production data, `npx wrangler d1 export your-city-bu
 
 **The build fails with `No such built-in module: node:sqlite` or `Object.groupBy is not a function`.** Node is too old. Use Node 22.13 or later locally, and set `NODE_VERSION=22` (or a `.node-version` file) for Git builds.
 
-**The build fails in `npm test` after you changed content.** The tests assert DeLand's example data, such as the site address in `tests/seo.test.js`, the share image file name, and catalog totals. Update the tests to match your data. [CUSTOMIZING.md](CUSTOMIZING.md#15-tests-that-check-delands-values) lists them.
+**The build fails in `npm test` after you changed content.** The tests follow your data, so a failure means the data or code breaks a rule the site depends on, not that a test is out of date. Read the failing test's name and message (for example, a choice without a description, department totals that do not add up, a social image that is not a 1200 by 630 JPEG, or a missing `millage-rate` guard). [CUSTOMIZING.md](CUSTOMIZING.md#15-how-the-tests-follow-your-data) lists what each test checks and the rules your data must follow.
 
 **`SITE_URL must be the public HTTPS origin...`.** `seo.url` (or `SITE_URL`) has a path, query, `http://`, or is `localhost`. Use the bare `https://` origin with a trailing slash.
 

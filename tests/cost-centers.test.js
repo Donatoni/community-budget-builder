@@ -1,308 +1,338 @@
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
-import { SERVICE_VIDEOS } from '../src/service-videos-data.js';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
-import { SERVICES, PROPOSED_TOTAL, fmtUSD } from '../src/budget.js';
-import { ALL_COST_CENTERS, COST_CENTERS, POTENTIAL_REVENUES, costCenterPlan, fmtBudgetM } from '../src/cost-centers.js';
+import source from '../src/cost-center-source.js';
+import { SERVICE_VIDEOS } from '../src/service-videos-data.js';
+import { SERVICES, PROPOSED_TOTAL, fmtM } from '../src/budget.js';
+import { ALL_COST_CENTERS, COST_CENTERS, COST_CENTER_VERSION, POTENTIAL_REVENUES, costCenterPlan } from '../src/cost-centers.js';
 import { initCostCenterBuilder, initRevenueBuilder } from '../src/cost-center-builder.js';
 import { readSharedPlan, resultURL } from '../src/share-plan.js';
+import { HEADLINES, THEMES } from '../src/postcard.js';
 import { onRequest as homepage } from '../functions/index.js';
 import { resultImageSVG } from '../server/result-image.js';
+import {
+  cents, sumCents, TARGET_CENTS, MILLAGE, CHECKBOX_REVENUES, noMillage, noRevenues,
+  revenueCents, cutsReaching, LARGEST_FIRST, usd, escapeXML, seededRandom,
+} from './support/catalog.js';
 
-const origin = 'https://amendment-3.delandfl.gov';
-const targetCuts = ['fire-ems', 'streets-signs'];
-const streets = SERVICES.find(s => s.id === 'streets').proposed;
-const signs = 517755.17, sidewalks = 675136.83;
+const origin = 'https://budget.example.gov';
+const allIds = ALL_COST_CENTERS.map(item => item.id);
+const serviceCents = SERVICES.map(service => Math.round(service.proposed * 1e8));
+const serviceIndex = id => SERVICES.findIndex(service => service.id === id);
+// A department with at least two choices, for tests that combine cuts.
+const pairService = SERVICES.find(service => COST_CENTERS[service.id].length >= 2) ?? SERVICES[0];
+const [first, second = first] = COST_CENTERS[pairService.id];
 
-test('exercise excludes Trailer Park and reconciles its updated baseline', () => {
-  assert.equal(ALL_COST_CENTERS.length, 34);
-  assert.equal(SERVICES.length, 5);
-  assert.equal(PROPOSED_TOTAL, 41.98788216);
-  assert.equal(SERVICES.find(service => service.id === 'parks').proposed, 5.05427165);
-  assert.equal(ALL_COST_CENTERS.filter(item => item.descriptionStatus === 'draft').length, 0);
-  assert.equal(ALL_COST_CENTERS.some(item => item.id === 'parks-trailer-park'), false);
-  const all = costCenterPlan(ALL_COST_CENTERS.map(item => item.id));
-  assert.ok(all.values.every(value => value === 0));
-});
-
-test('October 2 police costs reconcile and shared plans require the revised catalog', () => {
-  // Independently rounded from Main!I18:Q18, combining Field Ops and Com Engage.
-  assert.deepEqual(COST_CENTERS.police.map(item => item.savings), [
-    10893431.64, 680602.11, 2775176.44, 693011.10, 690212.56,
-    1014020.55, 180757.45, 85269.13,
-  ]);
-  assert.equal(COST_CENTERS.police[0].sourceCell, 'Main!I18, Main!O18');
-  assert.equal(ALL_COST_CENTERS.some(item => item.id === 'police-community-engagement'), false);
-  assert.equal(SERVICES.find(service => service.id === 'police').proposed, 17.01248098);
-  const cuts = ['police-field-operations', 'police-personnel-selection'];
-  const plan = costCenterPlan(cuts);
-  assert.equal(plan.reduction, 11583644.20);
-  assert.equal(plan.values[1], 5.42883678);
-  const url = new URL(resultURL(origin, plan.values, { cuts }));
-  assert.equal(url.searchParams.get('catalog'), 'fy26-27-6');
-  assert.deepEqual(readSharedPlan(url).values, plan.values);
-  url.searchParams.set('cuts', 'police-community-engagement');
-  assert.equal(readSharedPlan(url), null);
-  url.searchParams.set('cuts', cuts.join(','));
-  url.searchParams.set('catalog', 'fy26-27-5');
-  assert.equal(readSharedPlan(url), null);
-});
-
-test('potential revenues close the gap without cutting department funding', () => {
-  const plan = costCenterPlan([], ['fire-fee', 'millage-rate', 'fire-fee']);
-  assert.equal(plan.revenue, 5900000);
-  assert.equal(plan.reduction, 0);
-  assert.equal(plan.gapClosed, 5900000);
-  assert.ok(plan.targetMet);
-  assert.deepEqual(plan.values, SERVICES.map(s => s.proposed));
-  assert.equal(plan.revenues.length, 2);
-  assert.equal(costCenterPlan([], ['fire-fee']).targetMet, false);
-  assert.equal(costCenterPlan(['fire-ems'], ['recreation-fees']).targetMet, true);
-  assert.equal(costCenterPlan([], POTENTIAL_REVENUES.map(item => item.id)).revenue, 6690000);
-  const url = new URL(resultURL(origin, plan.values, { cuts: [], revenues: ['fire-fee', 'millage-rate'] }));
-  assert.deepEqual(readSharedPlan(url).revenues, ['fire-fee', 'millage-rate']);
-  assert.match(resultImageSVG({ ...readSharedPlan(url), side: 'back' }, {}), /Potential revenue: \$5.9M/);
-  for (const invalid of ['unknown', 'fire-fee,fire-fee', 'fire-fee,']) {
-    url.searchParams.set('revenues', invalid);
-    assert.equal(readSharedPlan(url), null);
-  }
-  assert.equal(readSharedPlan(`${origin}/?catalog=demo-1&cuts=fire-equipment`), null);
-});
-
-test('sports facilities combine three workbook costs into one cut and shareable choice', () => {
-  const sports = COST_CENTERS.parks.find(item => item.id === 'parks-sports-facilities');
-  assert.equal(COST_CENTERS.parks.length, 9);
-  assert.equal(sports.savings, 862368.60);
-  assert.equal(sports.sourceCell, 'Main!AH18, Main!AK18, Main!AL18');
-  const retired = ['parks-stadium', 'parks-sperling-sports-complex', 'parks-conrad-melching'];
-  assert.ok(retired.every(id => !ALL_COST_CENTERS.some(item => item.id === id)));
-  const plan = costCenterPlan([sports.id]);
-  assert.equal(plan.reduction, 862368.60);
-  assert.equal(plan.values[3], 4.19190305);
-  assert.equal(plan.items.length, 1);
-  const url = new URL(resultURL(origin, plan.values, { cuts: [sports.id] }));
-  assert.deepEqual(readSharedPlan(url).cuts, [sports.id]);
-  for (const id of retired) {
-    url.searchParams.set('cuts', id);
-    assert.equal(readSharedPlan(url), null);
-  }
-  url.searchParams.set('cuts', 'parks-recreation');
-  url.searchParams.set('catalog', 'fy26-27-2');
-  assert.equal(readSharedPlan(url), null);
-});
-
-test('revenue checkboxes add, remove, and reset choices', () => {
-  const { document, window } = parseHTML('<div id="revenues"></div>');
-  const previousDocument = globalThis.document;
+function withDocument(html, run) {
+  const { document, window } = parseHTML(html);
+  const previous = globalThis.document;
   globalThis.document = document;
-  try {
+  try { return run(document, window); }
+  finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
+}
+const toggle = (window, input, checked) => {
+  input.checked = checked;
+  input.dispatchEvent(new window.Event('change', { bubbles: true }));
+};
+
+// Source rows are traced to choices by sourceCell, which merges join with ", ".
+const rowsByCell = new Map(source.costCenters.map(row => [row.sourceCell, row]));
+const traceable = rowsByCell.size === source.costCenters.length
+  && source.costCenters.every(row => typeof row.sourceCell === 'string' && row.sourceCell.trim());
+
+test('every source row is counted in at most one choice, and merged choices add their parts in cents', { skip: traceable ? false : 'source rows need unique sourceCell values to trace choices to them' }, () => {
+  const used = new Set();
+  for (const item of ALL_COST_CENTERS) {
+    const cells = item.sourceCell.split(', ');
+    for (const cell of cells) {
+      assert.ok(rowsByCell.has(cell), `${item.id} cites unknown source ${cell}`);
+      assert.ok(!used.has(cell), `${cell} is counted in more than one choice`);
+      used.add(cell);
+    }
+    assert.equal(cents(item.savings), sumCents(cells.map(cell => rowsByCell.get(cell).totalCostCenter)), `${item.id} must equal its source rows`);
+  }
+  // Rows not cited by any choice are the exercise's exclusions; the baseline leaves them out.
+  const included = source.costCenters.filter(row => used.has(row.sourceCell));
+  assert.ok(included.length > 0);
+  assert.equal(Math.round(PROPOSED_TOTAL * 1e8), sumCents(included.map(row => row.totalCostCenter)));
+});
+
+test('choices have unique URL-safe ids, descriptions, and department totals that reconcile in cents', () => {
+  assert.equal(new Set(allIds).size, allIds.length);
+  // Every grouped choice belongs to a listed department, so none silently disappear.
+  assert.deepEqual(Object.keys(COST_CENTERS).sort(), SERVICES.map(service => service.id).sort());
+  let totalCents = 0;
+  for (const [i, service] of SERVICES.entries()) {
+    const items = COST_CENTERS[service.id];
+    assert.ok(items.length > 0, `${service.id} needs at least one choice`);
+    for (const item of items) {
+      assert.match(item.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/, `${item.id} must be safe in links and HTML ids`);
+      assert.equal(item.serviceId, service.id);
+      assert.ok(Number.isFinite(item.savings), item.id);
+      assert.ok(Math.abs(item.savings * 100 - cents(item.savings)) < 1e-6, `${item.id} is rounded to cents`);
+      assert.ok(typeof item.name === 'string' && item.name.trim(), `${item.id} needs a name`);
+      assert.ok(typeof item.impact === 'string' && item.impact.trim(), `${item.id} needs a supplied or draft description`);
+      assert.ok(['supplied', 'draft'].includes(item.descriptionStatus));
+    }
+    assert.equal(serviceCents[i], sumCents(items.map(item => item.savings)), service.id);
+    totalCents += serviceCents[i];
+  }
+  assert.equal(Math.round(PROPOSED_TOTAL * 1e8), totalCents);
+  assert.equal(ALL_COST_CENTERS.length, SERVICES.reduce((count, service) => count + COST_CENTERS[service.id].length, 0));
+});
+
+test('cuts subtract only the chosen costs, deduplicate, ignore unknown ids, and restore to the baseline', () => {
+  const baseline = costCenterPlan([]);
+  assert.deepEqual(baseline.values, SERVICES.map(service => service.proposed));
+  assert.equal(baseline.reduction, 0);
+  assert.equal(baseline.items.length, 0);
+  const chosen = [...new Set([first, second])];
+  const plan = costCenterPlan([first.id, second.id, second.id, 'not-a-choice']);
+  const removed = sumCents(chosen.map(item => item.savings));
+  assert.deepEqual(plan.items.map(item => item.id), chosen.map(item => item.id));
+  assert.equal(plan.reduction, removed / 100);
+  const index = serviceIndex(pairService.id);
+  plan.values.forEach((value, i) => assert.equal(value, (serviceCents[i] - (i === index ? removed : 0)) / 1e8, SERVICES[i].id));
+  assert.equal(costCenterPlan([first.id]).values[index], (serviceCents[index] - cents(first.savings)) / 1e8);
+});
+
+test('cutting every choice empties every department and reconciles with the baseline', () => {
+  const all = costCenterPlan(allIds);
+  assert.ok(all.values.every(value => value === 0));
+  assert.equal(all.reduction, sumCents(ALL_COST_CENTERS.map(item => item.savings)) / 100);
+  assert.equal(all.reduction, Math.round(PROPOSED_TOTAL * 1e8) / 100);
+  assert.ok(all.targetMet, 'cutting every choice must close the gap');
+  const random = seededRandom(7);
+  for (let round = 0; round < 300; round++) {
+    const ids = allIds.filter(() => random() < 0.3);
+    const plan = costCenterPlan(ids);
+    const chosen = ALL_COST_CENTERS.filter(item => ids.includes(item.id));
+    const removed = sumCents(chosen.map(item => item.savings));
+    assert.equal(plan.reduction, removed / 100);
+    SERVICES.forEach((service, i) => assert.equal(plan.values[i], (serviceCents[i] - sumCents(chosen.filter(item => item.serviceId === service.id).map(item => item.savings))) / 1e8, `${service.id} after ${ids.join(',')}`));
+    assert.equal(Math.round(plan.values.reduce((sum, value) => sum + value, 0) * 1e8), Math.round(PROPOSED_TOTAL * 1e8) - removed);
+  }
+});
+
+test('the gap target compares exact cents of cuts plus revenue, below and above the line', () => {
+  const ids = cutsReaching();
+  const enough = costCenterPlan(ids);
+  assert.ok(enough.targetMet);
+  assert.ok(cents(enough.gapClosed) >= TARGET_CENTS);
+  const short = costCenterPlan(ids.slice(0, -1));
+  assert.equal(short.targetMet, false);
+  assert.ok(cents(short.gapClosed) < TARGET_CENTS);
+  // Plans one choice away from the line, on either side.
+  for (const item of ALL_COST_CENTERS.filter(candidate => !ids.slice(0, -1).includes(candidate.id))) {
+    const near = [...ids.slice(0, -1), item.id];
+    assert.equal(costCenterPlan(near).targetMet, cents(short.gapClosed) + cents(item.savings) >= TARGET_CENTS, near.join(','));
+  }
+  const random = seededRandom(11);
+  const revenueIds = CHECKBOX_REVENUES.map(item => item.id);
+  for (let round = 0; round < 200; round++) {
+    const cuts = LARGEST_FIRST.filter(() => random() < 0.25).map(item => item.id);
+    const revenues = revenueIds.filter(() => random() < 0.5);
+    const tenths = MILLAGE ? Math.floor(random() * 11) : 0;
+    if (tenths) revenues.push(MILLAGE.id);
+    const plan = costCenterPlan(cuts, revenues, MILLAGE ? tenths / 10 : undefined);
+    const reduction = sumCents(ALL_COST_CENTERS.filter(item => cuts.includes(item.id)).map(item => item.savings));
+    const revenue = revenueCents(revenues, tenths);
+    assert.equal(plan.reduction, reduction / 100);
+    assert.equal(plan.revenue, revenue / 100);
+    assert.equal(plan.gapClosed, (reduction + revenue) / 100);
+    assert.equal(plan.targetMet, reduction + revenue >= TARGET_CENTS, `${cuts.join(',')} + ${revenues.join(',')}`);
+  }
+});
+
+test('potential revenues close the gap without cutting department funding', { skip: noRevenues }, () => {
+  const ids = POTENTIAL_REVENUES.map(item => item.id);
+  const expected = revenueCents(ids);
+  const plan = costCenterPlan([], [...ids, ids[0]]);
+  assert.equal(plan.revenue, expected / 100);
+  assert.equal(plan.reduction, 0);
+  assert.equal(plan.gapClosed, expected / 100);
+  assert.equal(plan.targetMet, expected >= TARGET_CENTS);
+  assert.deepEqual(plan.values, SERVICES.map(service => service.proposed));
+  assert.deepEqual(plan.revenues.map(item => item.id), ids);
+  for (const item of POTENTIAL_REVENUES) {
+    const single = costCenterPlan([], [item.id]);
+    assert.equal(single.revenue, revenueCents([item.id]) / 100, item.id);
+    assert.equal(single.targetMet, revenueCents([item.id]) >= TARGET_CENTS, item.id);
+  }
+  const url = new URL(resultURL(origin, plan.values, { cuts: [], revenues: ids }));
+  assert.deepEqual(readSharedPlan(url).revenues, ids);
+  assert.ok(resultImageSVG({ ...readSharedPlan(url), side: 'back' }, {}).includes(`Potential revenue: ${escapeXML(fmtM(expected / 1e8))}`));
+  for (const invalid of ['unknown', `${ids[0]},${ids[0]}`, `${ids[0]},`]) {
+    url.searchParams.set('revenues', invalid);
+    assert.equal(readSharedPlan(url), null, invalid);
+  }
+  assert.throws(() => resultURL(origin, plan.values, { cuts: [], revenues: ['unknown'] }));
+});
+
+test('share links require the current catalog and preserve exact choices, including different cuts with equal costs', () => {
+  const theme = Object.keys(THEMES).at(-1);
+  const headline = HEADLINES.length - 1;
+  for (const cuts of [[], cutsReaching(), [...allIds].reverse()]) {
+    const plan = costCenterPlan(cuts);
+    for (const image of [false, true]) {
+      const url = resultURL(origin, plan.values, { cuts, theme, headline, side: 'back' }, image);
+      assert.equal(new URL(url).searchParams.get('catalog'), COST_CENTER_VERSION);
+      const parsed = readSharedPlan(url);
+      assert.deepEqual(parsed.cuts, plan.items.map(item => item.id));
+      assert.deepEqual(parsed.values, plan.values);
+      assert.equal(parsed.theme, theme);
+      assert.equal(parsed.headline, headline);
+      assert.equal(parsed.side, 'back');
+    }
+  }
+  const index = serviceIndex(first.serviceId);
+  const values = costCenterPlan([first.id]).values;
+  const url = new URL(resultURL(origin, values, { cuts: [first.id] }));
+  // The catalog, not a budget in the link, defines a cost-center plan.
+  url.searchParams.set('b', SERVICES.map(() => '0').join('_'));
+  assert.equal(readSharedPlan(url).values[index], (serviceCents[index] - cents(first.savings)) / 1e8);
+  for (const cuts of ['unknown', `${first.id},${first.id}`, `${first.id},`]) {
+    url.searchParams.set('cuts', cuts);
+    assert.equal(readSharedPlan(url), null, cuts);
+  }
+  url.searchParams.set('cuts', first.id);
+  for (const catalog of [`${COST_CENTER_VERSION}-old`, 'obsolete', '']) {
+    url.searchParams.set('catalog', catalog);
+    assert.equal(readSharedPlan(url), null, catalog);
+  }
+  url.searchParams.delete('catalog');
+  assert.equal(readSharedPlan(url), null);
+  assert.throws(() => resultURL(origin, values, { cuts: ['not-a-choice'] }));
+});
+
+test('homepage redirects and server previews preserve the cost-center plan and precise savings', async () => {
+  const item = LARGEST_FIRST[0];
+  const index = serviceIndex(item.serviceId);
+  const plan = costCenterPlan([item.id]);
+  const url = new URL(resultURL(origin, plan.values, { cuts: [item.id], side: 'back' }));
+  url.pathname = '/';
+  const response = await homepage({ request: new Request(url) });
+  assert.equal(response.status, 302);
+  assert.deepEqual(readSharedPlan(response.headers.get('Location')).cuts, [item.id]);
+  const svg = resultImageSVG(readSharedPlan(url), {});
+  assert.ok(svg.includes(`${escapeXML(fmtM(item.savings / 1e6))} deducted`));
+  assert.ok(svg.includes(escapeXML(fmtM((serviceCents[index] - cents(item.savings)) / 1e8))));
+});
+
+test('checkbox interactions and restore keep rendered totals and service choices in sync', () => {
+  withDocument('<div id="centers"></div>', (document, window) => {
+    const container = document.querySelector('#centers');
+    const selected = new Set([first.id]);
+    const render = initCostCenterBuilder(container, selected, () => render());
+    render();
+    const amount = id => container.querySelector(`#amt-${id}`).textContent;
+    const delta = id => container.querySelector(`#delta-${id}`).textContent;
+    assert.equal(container.querySelectorAll('input[type="range"]').length, 0);
+    assert.equal(container.querySelectorAll('input[type="checkbox"]').length, ALL_COST_CENTERS.length);
+    assert.equal(container.querySelectorAll('.description-draft').length, ALL_COST_CENTERS.filter(item => item.descriptionStatus === 'draft').length);
+    for (const [i, service] of SERVICES.entries()) {
+      assert.equal(container.querySelectorAll(`.svc-${service.id} input`).length, COST_CENTERS[service.id].length);
+      const preselected = service.id === first.serviceId ? cents(first.savings) : 0;
+      const item = COST_CENTERS[service.id].find(candidate => candidate.id !== first.id);
+      if (!item) continue;
+      assert.equal(container.querySelector(`#price-${item.id} strong`).textContent, usd(item.savings));
+      assert.ok(container.querySelector(`#effect-${item.id}`).textContent.startsWith(item.impact.trim().slice(0, 40)));
+      const input = container.querySelector(`#cut-${item.id}`);
+      toggle(window, input, true);
+      assert.equal(amount(service.id), usd((serviceCents[i] - preselected - cents(item.savings)) / 100));
+      assert.equal(delta(service.id), usd((preselected + cents(item.savings)) / 100));
+      assert.equal(input.closest('label').querySelector('.cost-choice-state').textContent, 'Cut selected');
+      toggle(window, input, false);
+      assert.equal(amount(service.id), usd((serviceCents[i] - preselected) / 100));
+      assert.equal(input.closest('label').querySelector('.cost-choice-state').textContent, 'Select to cut');
+    }
+    selected.clear();
+    render();
+    SERVICES.forEach((service, i) => assert.equal(amount(service.id), usd(serviceCents[i] / 100)));
+    assert.ok([...container.querySelectorAll('input')].every(input => !input.checked));
+  });
+});
+
+test('revenue checkboxes add, remove, and reset choices', { skip: CHECKBOX_REVENUES.length ? false : 'this catalog has no checkbox revenue options' }, () => {
+  withDocument('<div id="revenues"></div>', (document, window) => {
     const container = document.querySelector('#revenues');
     const selected = new Set();
     const render = initRevenueBuilder(container, selected, () => render());
     render();
-    assert.equal(container.querySelectorAll('input').length, 6);
-    const input = container.querySelector('#revenue-fire-fee');
-    input.checked = true;
-    input.dispatchEvent(new window.Event('change', { bubbles: true }));
-    assert.equal(costCenterPlan([], selected).revenue, 3000000);
-    assert.equal(input.closest('label').querySelector('.cost-choice-state').textContent, 'Revenue added');
-    input.checked = false;
-    input.dispatchEvent(new window.Event('change', { bubbles: true }));
-    assert.equal(costCenterPlan([], selected).revenue, 0);
-    selected.add('millage-rate'); render(); selected.clear(); render();
-    assert.ok([...container.querySelectorAll('input')].every(input => !input.checked));
-  } finally {
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
-  }
+    assert.equal(container.querySelectorAll('input[type="checkbox"]').length, CHECKBOX_REVENUES.length);
+    assert.equal(container.querySelectorAll('input[type="range"]').length, MILLAGE ? 1 : 0);
+    for (const option of CHECKBOX_REVENUES) {
+      assert.equal(container.querySelector(`#revenue-price-${option.id} strong`).textContent, `+${usd(option.amount)}`);
+      const input = container.querySelector(`#revenue-${option.id}`);
+      toggle(window, input, true);
+      assert.equal(costCenterPlan([], selected).revenue, cents(option.amount) / 100);
+      assert.equal(input.closest('label').querySelector('.cost-choice-state').textContent, 'Revenue added');
+      toggle(window, input, false);
+      assert.equal(costCenterPlan([], selected).revenue, 0);
+    }
+    for (const option of CHECKBOX_REVENUES) selected.add(option.id);
+    if (MILLAGE) selected.add(MILLAGE.id);
+    render();
+    assert.ok([...container.querySelectorAll('input[type="checkbox"]')].every(input => input.checked));
+    selected.clear();
+    render();
+    assert.ok([...container.querySelectorAll('input[type="checkbox"]')].every(input => !input.checked));
+  });
 });
 
-test('millage slider updates precise revenue, restores shared rates, and resets to zero', () => {
-  const { document, window } = parseHTML('<div id="revenues"></div>');
-  const previousDocument = globalThis.document;
-  globalThis.document = document;
-  try {
+test('millage slider updates precise revenue, restores shared rates, and resets to zero', { skip: noMillage }, () => {
+  withDocument('<div id="revenues"></div>', (document, window) => {
     const container = document.querySelector('#revenues');
-    const selected = new Set(['millage-rate']);
+    const selected = new Set([MILLAGE.id]);
     const adjustment = { millageRate: 0.4 };
     const render = initRevenueBuilder(container, selected, () => render(), adjustment);
     render();
     const slider = container.querySelector('#revenue-millage-rate');
+    const shown = tenths => `+${usd(Math.round(cents(MILLAGE.amount) * tenths / 10) / 100)}`;
+    const slide = value => { slider.value = value; slider.dispatchEvent(new window.Event('input', { bubbles: true })); };
     assert.equal(slider.type, 'range');
     assert.equal(slider.value, '0.4');
-    assert.equal(container.querySelectorAll('input[type="checkbox"]').length, 5);
-    assert.match(container.querySelector('#revenue-effect-millage-rate').textContent, /Each 0.1 mill adds an estimated \$290,000 annually/);
-    assert.equal(container.querySelector('#millage-revenue-amount').textContent, '+$1,160,000');
-    slider.value = '0.5';
-    slider.dispatchEvent(new window.Event('input', { bubbles: true }));
-    assert.equal(costCenterPlan([], selected, adjustment.millageRate).revenue, 1450000);
-    assert.match(slider.getAttribute('aria-valuetext'), /0.5 mills increase, \$1,450,000/);
-    slider.value = '0.1';
-    slider.dispatchEvent(new window.Event('input', { bubbles: true }));
-    assert.equal(container.querySelector('#millage-revenue-amount').textContent, '+$290,000');
-    assert.equal(costCenterPlan([], selected, adjustment.millageRate).revenue, 290000);
-    slider.value = '1';
-    slider.dispatchEvent(new window.Event('input', { bubbles: true }));
-    assert.equal(container.querySelector('#millage-revenue-amount').textContent, '+$2,900,000');
-    assert.equal(costCenterPlan([], selected, adjustment.millageRate).revenue, 2900000);
-    slider.value = '0';
-    slider.dispatchEvent(new window.Event('input', { bubbles: true }));
-    assert.equal(selected.has('millage-rate'), false);
+    assert.equal(container.querySelectorAll('input[type="checkbox"]').length, CHECKBOX_REVENUES.length);
+    assert.ok(container.querySelector('#revenue-effect-millage-rate').textContent.includes(`Each 0.1 mill adds an estimated ${usd(MILLAGE.amount / 10)} annually`));
+    assert.equal(container.querySelector('#millage-revenue-amount').textContent, shown(4));
+    for (const tenths of [5, 1, 10]) {
+      slide(String(tenths / 10));
+      assert.equal(costCenterPlan([], selected, adjustment.millageRate).revenue, revenueCents([MILLAGE.id], tenths) / 100);
+      assert.equal(container.querySelector('#millage-revenue-amount').textContent, shown(tenths));
+      assert.ok(slider.getAttribute('aria-valuetext').startsWith(`${(tenths / 10).toFixed(1)} ${tenths === 10 ? 'mill' : 'mills'} increase, ${usd(revenueCents([MILLAGE.id], tenths) / 100)}`));
+    }
+    slide('0');
+    assert.equal(selected.has(MILLAGE.id), false);
     assert.equal(costCenterPlan([], selected, adjustment.millageRate).revenue, 0);
     selected.clear(); adjustment.millageRate = 0; render();
     assert.equal(slider.value, '0');
-  } finally {
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
-  }
+  });
 });
 
-test('partial millage survives shared links and social images with validated bounds', () => {
-  const options = { cuts: [], revenues: ['millage-rate'], millageRate: 0.5, side: 'back' };
+test('partial millage survives shared links and social images with validated bounds', { skip: noMillage }, () => {
+  const options = { cuts: [], revenues: [MILLAGE.id], millageRate: 0.5, side: 'back' };
   const plan = costCenterPlan([], options.revenues, options.millageRate);
   const url = new URL(resultURL(origin, plan.values, options));
   const parsed = readSharedPlan(url);
   assert.equal(parsed.millageRate, 0.5);
-  assert.match(resultImageSVG(parsed, {}), /Potential revenue: \$1.45M/);
+  assert.ok(resultImageSVG(parsed, {}).includes(`Potential revenue: ${escapeXML(fmtM(revenueCents([MILLAGE.id], 5) / 1e8))}`));
   assert.notEqual(resultURL(origin, plan.values, options, true), resultURL(origin, plan.values, { ...options, millageRate: 1 }, true));
-  for (const invalid of ['-0.1', '1.1', '0.15', 'NaN', '', '0']) {
+  // Only canonical tenths are accepted, so each plan has one link and one cached image.
+  for (const invalid of ['-0.1', '1.1', '2', '0.15', 'NaN', '', '0', '01', '1.0.0', '0.50', ' 0.5', '5e-1', '.5', '+0.5', '0x1']) {
     url.searchParams.set('millage', invalid);
     assert.equal(readSharedPlan(url), null, invalid);
   }
   url.searchParams.set('millage', '0.5');
   url.searchParams.set('revenues', '');
   assert.equal(readSharedPlan(url), null);
-  assert.throws(() => resultURL(origin, plan.values, { ...options, millageRate: 0.15 }));
-});
-
-test('catalog uses unique stable IDs, signed net costs, and reconciled department totals', () => {
-  assert.equal(new Set(ALL_COST_CENTERS.map(item => item.id)).size, ALL_COST_CENTERS.length);
-  for (const service of SERVICES) {
-    assert.ok(COST_CENTERS[service.id].length > 0);
-    for (const item of COST_CENTERS[service.id]) {
-      assert.match(item.id, /^[a-z]+(?:-[a-z]+)+$/);
-      assert.ok(Number.isFinite(item.savings));
-      assert.ok(item.name && item.impact);
-    }
-    assert.equal(COST_CENTERS[service.id].reduce((sum, item) => sum + Math.round(item.savings * 100), 0), Math.round(service.proposed * 1e8));
-  }
-});
-
-test('cuts subtract only the chosen costs, deduplicate, and restore to the baseline', () => {
-  assert.deepEqual(costCenterPlan([]).values, SERVICES.map(service => service.proposed));
-  const plan = costCenterPlan(['streets-sidewalks', 'streets-signs', 'streets-signs', 'unknown']);
-  assert.equal(plan.reduction, 1192892);
-  assert.equal(plan.values[2], 4.35818166);
-  assert.equal(plan.values[0], SERVICES[0].proposed);
-  assert.equal(plan.items.length, 2);
-  assert.equal(costCenterPlan(['streets-signs']).values[2], 5.03331849);
-  assert.equal(costCenterPlan([]).reduction, 0);
-  assert.equal(fmtBudgetM(plan.reduction / 1e6), '$1.19M');
-});
-
-test('submission target uses exact dollars at, below, and above $5.2M', () => {
-  assert.equal(costCenterPlan(targetCuts).reduction, 5585049.19);
-  assert.equal(costCenterPlan(targetCuts).targetMet, true);
-  assert.equal(costCenterPlan(targetCuts.slice(0, -1)).targetMet, false);
-  const all = costCenterPlan(ALL_COST_CENTERS.map(item => item.id));
-  assert.ok(all.targetMet && all.values.every(value => value >= 0));
-  assert.ok(Math.abs(PROPOSED_TOTAL - all.values.reduce((a, b) => a + b, 0) - all.reduction / 1e6) < 1e-9);
-});
-
-test('share links preserve exact item choices, including different cuts with equal costs', () => {
-  for (const cuts of [[], targetCuts, ALL_COST_CENTERS.map(item => item.id)]) {
-    const plan = costCenterPlan(cuts);
-    for (const image of [false, true]) {
-      const url = resultURL(origin, plan.values, { cuts, theme: 'citrus', headline: 2, side: 'back' }, image);
-      const parsed = readSharedPlan(url);
-      assert.deepEqual(parsed.cuts, plan.items.map(item => item.id));
-      assert.deepEqual(parsed.values, plan.values);
-      assert.equal(parsed.theme, 'citrus');
-      assert.equal(parsed.side, 'back');
-    }
-  }
-  const values = costCenterPlan(['streets-signs']).values;
-  const url = new URL(resultURL(origin, values, { cuts: ['streets-signs'] }));
-  url.searchParams.set('b', '0_0_0_0_0_0');
-  assert.equal(readSharedPlan(url).values[2], 5.03331849);
-  for (const cuts of ['unknown', 'streets-signs,streets-signs', 'streets-signs,']) {
-    url.searchParams.set('cuts', cuts);
-    assert.equal(readSharedPlan(url), null);
-  }
-  url.searchParams.set('cuts', 'streets-signs');
-  url.searchParams.set('catalog', 'obsolete');
-  assert.equal(readSharedPlan(url), null);
-});
-
-test('homepage redirects and server previews preserve the cost-center plan and precise savings', async () => {
-  const plan = costCenterPlan(['streets-signs']);
-  const url = new URL(resultURL(origin, plan.values, { cuts: ['streets-signs'], side: 'back' }));
-  url.pathname = '/';
-  const response = await homepage({ request: new Request(url) });
-  assert.equal(response.status, 302);
-  assert.deepEqual(readSharedPlan(response.headers.get('Location')).cuts, ['streets-signs']);
-  const svg = resultImageSVG(readSharedPlan(url), {});
-  assert.match(svg, /\$0.52M deducted/);
-  assert.match(svg, /\$5.03M/);
-});
-
-test('checkbox interactions and restore keep rendered totals and service choices in sync', () => {
-  const { document, window } = parseHTML('<div id="centers"></div>');
-  const previousDocument = globalThis.document;
-  globalThis.document = document;
-  try {
-    const container = document.querySelector('#centers');
-    const selected = new Set(['streets-signs']);
-    const render = initCostCenterBuilder(container, selected, () => render());
-    render();
-    assert.equal(container.querySelectorAll('input[type="range"]').length, 0);
-    assert.equal(container.querySelectorAll('input[type="checkbox"]').length, ALL_COST_CENTERS.length);
-    assert.equal(container.querySelector('#cut-parks-trailer-park'), null);
-    assert.equal(container.querySelectorAll('.svc-parks input').length, 9);
-    assert.equal(container.querySelectorAll('.description-draft').length, 0);
-    assert.equal(container.querySelector('#cut-police-community-engagement'), null);
-    assert.equal(container.querySelectorAll('.svc-police input').length, 8);
-    assert.match(container.querySelector('#effect-police-field-operations').textContent, /includes community engagement/);
-    assert.equal(container.querySelector('#price-police-field-operations strong').textContent, '$10,893,432');
-    const fieldOperations = container.querySelector('#cut-police-field-operations');
-    fieldOperations.checked = true;
-    fieldOperations.dispatchEvent(new window.Event('change', { bubbles: true }));
-    assert.equal(container.querySelector('#amt-police').textContent, '$6,119,049');
-    assert.equal(container.querySelector('#delta-police').textContent, '$10,893,432');
-    fieldOperations.checked = false;
-    fieldOperations.dispatchEvent(new window.Event('change', { bubbles: true }));
-    assert.equal(container.querySelector('#amt-police').textContent, '$17,012,481');
-    const sports = container.querySelector('#cut-parks-sports-facilities');
-    sports.checked = true;
-    sports.dispatchEvent(new window.Event('change', { bubbles: true }));
-    assert.equal(container.querySelector('#amt-parks').textContent, '$4,191,903');
-    assert.equal(container.querySelector('#delta-parks').textContent, '$862,369');
-    sports.checked = false;
-    sports.dispatchEvent(new window.Event('change', { bubbles: true }));
-    assert.equal(container.querySelector('#amt-parks').textContent, '$5,054,272');
-    assert.equal(container.querySelector('#amt-streets').textContent, fmtUSD(streets * 1e6 - signs));
-    const checkbox = container.querySelector('#cut-streets-sidewalks');
-    checkbox.checked = true;
-    checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
-    assert.equal(container.querySelector('#amt-streets').textContent, fmtUSD(streets * 1e6 - signs - sidewalks));
-    assert.equal(container.querySelector('#delta-streets').textContent, '$1,192,892');
-    assert.equal(checkbox.closest('label').querySelector('.cost-choice-state').textContent, 'Cut selected');
-    checkbox.checked = false;
-    checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
-    assert.equal(container.querySelector('#amt-streets').textContent, fmtUSD(streets * 1e6 - signs));
-    selected.clear();
-    render();
-    assert.equal(container.querySelector('#amt-streets').textContent, fmtUSD(streets * 1e6));
-    assert.ok([...container.querySelectorAll('input')].every(input => !input.checked));
-  } finally {
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
-  }
+  for (const millageRate of [0.15, -0.1, 1.1, 0]) assert.throws(() => resultURL(origin, plan.values, { ...options, millageRate }), String(millageRate));
 });
 
 test('department videos only initialize for departments present in the page', () => {
   const { document } = parseHTML(readFileSync(new URL('../index.html', import.meta.url), 'utf8'));
-  for (const id of Object.keys(SERVICE_VIDEOS)) assert.ok(document.querySelector(`#tour-${id}`));
-  assert.equal(document.querySelector('#tour-admin'), null);
+  for (const id of Object.keys(SERVICE_VIDEOS)) assert.ok(document.querySelector(`#tour-${id}`), `index.html needs #tour-${id}`);
 });

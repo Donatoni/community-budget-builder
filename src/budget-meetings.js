@@ -3,7 +3,7 @@
 // the City Clerk posts a meeting, its agenda, or its recording.
 export const MEETING_PORTAL = 'https://delandfl.portal.civicclerk.com';
 const EVENTS_API = 'https://delandfl.api.civicclerk.com/v1/Events';
-const BUDGET_MEETING_START = 'T18:00';
+export const BUDGET_MEETING_START = 'T18:00';
 
 const nextDay = date => new Date(Date.parse(`${date}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
 

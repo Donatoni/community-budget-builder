@@ -10,7 +10,7 @@ This site was built for the City of DeLand, Florida, to explain how Florida's Am
 - Work from top to bottom. The most visible changes come first; the budget data and the technical items come later.
 - Every path is relative to the repository root. "Search for" means use your editor's find (or `grep`) for that exact text.
 - Line numbers are given where the files are stable. They can drift by a few lines as you edit, so trust the search string over the number.
-- Tick the boxes as you go. When you are done, run the commands in [Find what is left](#16-find-what-is-left) to catch stragglers, then run `npm test` and update the tests listed in [section 15](#15-tests-that-check-delands-values).
+- Tick the boxes as you go. When you are done, run the commands in [Find what is left](#16-find-what-is-left) to catch stragglers, then run `npm test`. The tests read your data and settings, so they should pass without edits; [section 15](#15-how-the-tests-follow-your-data) explains what they check and the few rules your data must meet.
 
 **Who does what.** Sections 1 to 6 are mostly copy, photos and contact details, so communications staff can do them (with someone comfortable editing HTML). Sections 7 to 15 involve JavaScript and should go to your web developer or IT staff.
 
@@ -32,7 +32,7 @@ This site was built for the City of DeLand, Florida, to explain how Florida's Am
 12. [Colors and fonts](#12-colors-and-fonts)
 13. [Add your own analytics](#13-add-your-own-analytics)
 14. [Internal names you may want to rename](#14-internal-names-you-may-want-to-rename)
-15. [Tests that check DeLand's values](#15-tests-that-check-delands-values)
+15. [How the tests follow your data](#15-how-the-tests-follow-your-data)
 16. [Find what is left](#16-find-what-is-left)
 
 ---
@@ -239,8 +239,8 @@ There are three different images. Know which is which before you start.
 
 - **File:** [public/assets/deland-explore-options-social.jpg](public/assets/deland-explore-options-social.jpg), 1200 by 630 px, 141 KB.
 - **Referenced in:** [src/seo.js](src/seo.js), `seo.image` (line 10) and its description `seo.imageAlt` (line 11). These fill the `og:image`, `twitter:image` and structured data tags at build time; there are no hand-written image tags in the HTML.
-- **Rules (checked by [tests/seo.test.js](tests/seo.test.js)):** must be a **JPEG**, exactly **1200 by 630**, and **under 500 KB**. The image type and size are written into the tags as fixed values in `renderHead()` and `structuredData()` (lines 63 and 83), so if you ever switch to PNG, change `image/jpeg` there and update the test.
-- Rename the file to something like `your-city-social.jpg` and update `seo.image`, `seo.imageAlt` and the file name asserted in [tests/seo.test.js](tests/seo.test.js) (line 24).
+- **Rules (checked by [tests/seo.test.js](tests/seo.test.js)):** must be a **JPEG**, exactly **1200 by 630**, and **under 500 KB**. The image type and size are written into the tags as fixed values in `renderHead()` and `structuredData()` (lines 63 and 83), so if you ever switch to PNG, change `image/jpeg` there and the JPEG checks in the test `live domain and share image agree across metadata, schema, and sitemap`.
+- Rename the file to something like `your-city-social.jpg` and update `seo.image` and `seo.imageAlt`. The test reads the file name from `seo.image`.
 
 ### Personal postcard (browser)
 
@@ -263,7 +263,7 @@ When a plan link is shared, [functions/share/index.js](functions/share/index.js)
 - **Assets it loads** ([functions/share/image.png.js](functions/share/image.png.js) line 15): the seal (must be **PNG**), the artwork as **JPEG** [public/assets/share-deland-landmark-puzzle.jpg](public/assets/share-deland-landmark-puzzle.jpg) at **960 by 576** (the size is also typed in on line 21, so match it or change it), and the fonts `public/assets/fonts/inter-400.ttf`, `inter-600.ttf`, `inter-800.ttf`. Make the JPEG and WebP from the same artwork.
 - **Text in [server/result-image.js](server/result-image.js):** `'MY DELAND BUDGET'` (line 39), the web address footer `'amendment-3.delandfl.gov · Personal budget proposal'` (line 62), and the frame colors (line 10 and the hex values in the `<svg>`). One department row per department (line 48 to 56); five rows fit.
 - **Title and description** in [src/share-plan.js](src/share-plan.js) `resultDescription()`: "My ... DeLand budget", "across five departments", "build your own DeLand budget".
-- **Refreshing cached images:** preview images are cached for a day, keyed by their URL. After you change the artwork or text, raise the `v` number in `resultURL()` ([src/share-plan.js](src/share-plan.js) line 50, currently `'8'`) so new links get new images, and update [tests/share-plan.test.js](tests/share-plan.test.js) line 22.
+- **Refreshing cached images:** preview images are cached for a day, keyed by their URL. After you change the artwork or text, raise the `v` number in `resultURL()` ([src/share-plan.js](src/share-plan.js) line 50, currently `'8'`) so new links get new images. The tests accept any value.
 
 - [ ] Site link preview JPEG replaced, `seo.image` and `seo.imageAlt` updated
 - [ ] Postcard artwork replaced as both WebP (browser) and JPEG 960 by 576 (server)
@@ -318,7 +318,7 @@ This is the heart of the site. The numbers flow like this:
 
 Every department total is the sum of its service choices, and the "baseline" ($41.99M for DeLand) is the sum of the departments. Amounts are added in whole cents to avoid rounding drift.
 
-**Keep the department ids** (`fire`, `police`, `streets`, `parks`, `planning`) even if your departments are named differently. They are internal keys used by the service cards in [index.html](index.html) (`tour-<id>`), [src/service-videos-data.js](src/service-videos-data.js), CSS classes and tests. Change the display `name` instead. If you need a different set of departments, see "Changing the number of departments" below.
+**Keep the department ids** (`fire`, `police`, `streets`, `parks`, `planning`) even if your departments are named differently. They are internal keys used by the service cards in [index.html](index.html) (`tour-<id>`), [src/service-videos-data.js](src/service-videos-data.js) and CSS classes. Change the display `name` instead. If you need a different set of departments, see "Changing the number of departments" below.
 
 ### Step 1: raw data, [src/cost-center-source.js](src/cost-center-source.js)
 
@@ -361,7 +361,7 @@ A negative `totalCostCenter` means the service earns more than it costs; the bui
 | 93 | `revenueNames` | Display names, same order |
 | 94 to 100 | `POTENTIAL_REVENUES` | **DeLand-only overrides by position:** the second option (index 1, the millage increase) has its amount replaced with `2900000` and its assumption rewritten; the sixth (index 5) has its assumption rewritten. Remove or adjust these overrides to match your list. |
 
-**The millage slider.** The option with id `millage-rate` is shown as a slider instead of a checkbox. Its `amount` is the estimated revenue of a **full 1 mill** increase (DeLand: $2.9M, or $290,000 per 0.1 mill). One mill is $1 per $1,000 of taxable value, so a rough figure is your citywide taxable value divided by 1,000, adjusted for collections. The 0 to 1 mill range in 0.1 steps is fixed in three places: the slider `min`/`max`/`step` and scale labels in [src/cost-center-builder.js](src/cost-center-builder.js) (line 63), `selectedMillageRate()` in [src/cost-centers.js](src/cost-centers.js) (line 15 to 21), and the `millage` check in `readSharedPlan()` in [src/share-plan.js](src/share-plan.js) (line 24). If your government cannot change its millage, remove the `millage-rate` option; the code checks for it by id, but that case is not covered by the tests, so try the builder afterwards.
+**The millage slider.** The option with id `millage-rate` is shown as a slider instead of a checkbox. Its `amount` is the estimated revenue of a **full 1 mill** increase (DeLand: $2.9M, or $290,000 per 0.1 mill). One mill is $1 per $1,000 of taxable value, so a rough figure is your citywide taxable value divided by 1,000, adjusted for collections. The 0 to 1 mill range in 0.1 steps is fixed in three places: the slider `min`/`max`/`step` and scale labels in [src/cost-center-builder.js](src/cost-center-builder.js) (line 63), `selectedMillageRate()` in [src/cost-centers.js](src/cost-centers.js) (line 15 to 21), and the `millage` check in `readSharedPlan()` in [src/share-plan.js](src/share-plan.js) (line 24). If your government cannot change its millage, remove the `millage-rate` option (its row in the source file, its entries in `revenueIds` and `revenueNames`, and the index 1 overrides, which then point at a different option). The plan math, share links and server check it by id and work without it, and the millage tests are skipped. **One code change is needed:** `initRevenueBuilder()` in [src/cost-center-builder.js](src/cost-center-builder.js) assumes the slider exists and throws without it, which stops the builder from loading. The test `revenue checkboxes add, remove, and reset choices` in [tests/cost-centers.test.js](tests/cost-centers.test.js) fails until you fix it: in that function, change `container.querySelector('#revenue-millage-rate').addEventListener(` (line 76) to use `?.addEventListener(`, and in the returned render function, after the `const slider = ...` line, wrap the lines through the `.millage-choice` line (lines 85 to 90) in `if (slider) { ... }`. Do not edit the test.
 
 ### Step 3: departments and target, [src/budget.js](src/budget.js)
 
@@ -370,7 +370,7 @@ A negative `totalCostCenter` means the service earns more than it costs; the bui
 | 3 | comment | Note about where DeLand's figures came from. Replace with your own source note. |
 | 6 | `REDUCTION_TARGET_M` | **The gap residents must close, in millions** (5.2). Drives the progress bar, the Submit button and the server check. Hand-typed copies of this number are listed in [section 4](#4-home-page-copy-section-by-section). |
 | 8 and 9 | `SUBMIT_ENDPOINT`, `FEEDBACK_ENDPOINT` | Not city-specific; leave them |
-| 11 to 88 | `SERVICES` | One entry per department, in display order: `id`, `icon` (one of the `<symbol id="icon-...">` names at the top of [index.html](index.html): `flame`, `shield`, `road`, `tree`, `chart`, `home`, `building`), `tone` (icon color: `coral`, `blue`, `orange`, `green`, `purple` or `navy`), `name` (shown everywhere), `proposed` (calculated from the choices; do not type a number). `desc`, `cutExamples` and `max` are left from an earlier version and are not shown on the page, but `max` still limits old-style share links and tests use all three, so update them sensibly. |
+| 11 to 88 | `SERVICES` | One entry per department, in display order: `id`, `icon` (one of the `<symbol id="icon-...">` names at the top of [index.html](index.html): `flame`, `shield`, `road`, `tree`, `chart`, `home`, `building`), `tone` (icon color: `coral`, `blue`, `orange`, `green`, `purple` or `navy`), `name` (shown everywhere), `proposed` (calculated from the choices; do not type a number). `desc`, `cutExamples` and `max` are left from an earlier version and are not shown on the page, but `max` still limits old-style share links and the tests expect exactly four `cutExamples` per department, so update them sensibly. |
 
 ### Step 4: catalog version, [src/cost-centers.js](src/cost-centers.js)
 
@@ -414,11 +414,11 @@ DeLand posts agendas and recordings on CivicClerk. [src/budget-meetings.js](src/
 | --- | --- | --- |
 | 4 | `MEETING_PORTAL` | `https://delandfl.portal.civicclerk.com` (the public portal; links point here) |
 | 5 | `EVENTS_API` | `https://delandfl.api.civicclerk.com/v1/Events` |
-| 6 | `BUDGET_MEETING_START` | `'T18:00'`, the usual start time, used to choose between two meetings on the same day |
+| 6 | `BUDGET_MEETING_START` | `'T18:00'`, the usual start time (keep the `THH:MM` form), used to choose between two meetings on the same day |
 | 12 and 21 | `'City Commission'` | The meeting category (your portal may call it City Council or Board of County Commissioners) |
 
 - **If you use CivicClerk:** replace `delandfl` in both addresses with your portal's name, and update the category and start time.
-- **If you do not:** delete the `initBudgetMeetings();` line in [src/main.js](src/main.js) (near the end, search for `initBudgetMeetings();`). The schedule stays as plain text. You could also write a small adapter for your own portal that returns the same fields (`id`, `startDateTime`, `categoryName`, `publishedFiles`, `hasMedia`). Delete or rewrite [tests/budget-meetings.test.js](tests/budget-meetings.test.js) to match.
+- **If you do not:** delete the `initBudgetMeetings();` line in [src/main.js](src/main.js) (near the end, search for `initBudgetMeetings();`). The schedule stays as plain text, and [tests/budget-meetings.test.js](tests/budget-meetings.test.js) still passes because it tests the matching functions, not the call. You could also write a small adapter for your own portal that returns the same fields (`id`, `startDateTime`, `categoryName`, `publishedFiles`, `hasMedia`); if you change the matching rules themselves, update that test file to describe your rules.
 
 **The schedule itself** is plain HTML in [index.html](index.html), `ol.meeting-list` (line 429 to 454). Each meeting is:
 
@@ -469,11 +469,10 @@ The PDF uses the built-in Helvetica font and has no logo, so there is no image t
 
 ### Time zone
 
-Dashboard dates, reporting days, date filters, CSV files and PDF reports all use **Eastern Time**. Records are stored in UTC, so changing the zone does not change any data, only how it is grouped and shown.
+Dashboard dates, reporting days, date filters, CSV files and PDF reports all use **Eastern Time**. Records are stored in UTC, so changing the zone does not change any data, only how it is grouped and shown. The tests check day boundaries against whatever zone you set; the daylight saving test is skipped for zones without daylight saving time, such as `America/Phoenix`.
 
 - [ ] Change `DASHBOARD_TIME_ZONE` in [src/dashboard-time.js](src/dashboard-time.js) (line 1, `'America/New_York'`) to your zone's standard name, for example `'America/Chicago'`, `'America/Denver'`, `'America/Phoenix'` or `'America/Los_Angeles'`. It is used by the dashboard in the browser and by [server/dashboard-api.js](server/dashboard-api.js) for reporting day boundaries.
 - [ ] Replace the words "Eastern Time", which are typed separately: [admin/index.html](admin/index.html) line 53 (`#updated-label`), [src/dashboard.js](src/dashboard.js) lines 67, 80, 148, 149, 181, 228 and 231, [src/dashboard-data.js](src/dashboard-data.js) line 55 (CSV column heading), and [src/dashboard-pdf.js](src/dashboard-pdf.js) line 14.
-- [ ] Update [tests/dashboard-time.test.js](tests/dashboard-time.test.js) (its examples are Eastern daylight saving dates) and [tests/dashboard.test.js](tests/dashboard.test.js) (Eastern day boundaries and the CSV heading).
 
 The meetings code ([section 9](#9-public-meetings-civicclerk)) does not use this setting.
 
@@ -541,33 +540,60 @@ Visitors never see these, so renaming is optional. Each one is safe to leave.
 | File | Locator | What it is | Note |
 | --- | --- | --- | --- |
 | [src/main.js](src/main.js) | `deland-budget-submissions` (lines 507 and 510), `deland-feedback-completed` (line 643) | Browser storage keys | Renaming only forgets earlier visits' local markers |
-| [server/reviewer-access.js](server/reviewer-access.js) | `COOKIE` (line 3), `deland_reviewer` | Reviewer sign-in cookie | Renaming signs everyone out; update [tests/reviewer-access.test.js](tests/reviewer-access.test.js) |
-| [server/staff-auth.js](server/staff-auth.js) | `COOKIE` (line 4), `deland_staff` | Staff sign-in cookie | Same; update [tests/dashboard.test.js](tests/dashboard.test.js) line 100 |
-| [src/share.js](src/share.js), [src/dashboard.js](src/dashboard.js) | `my-deland`, `deland-report`, `deland-` | Downloaded file names | Visible in residents' and staff's downloads folders; update [tests/share-download.test.js](tests/share-download.test.js) and [tests/share-plan.test.js](tests/share-plan.test.js) |
+| [server/reviewer-access.js](server/reviewer-access.js) | `COOKIE` (line 3), `deland_reviewer` | Reviewer sign-in cookie | Renaming signs everyone out. Keep it different from the staff cookie. |
+| [server/staff-auth.js](server/staff-auth.js) | `COOKIE` (line 4), `deland_staff` | Staff sign-in cookie | Same |
+| [src/share.js](src/share.js), [src/dashboard.js](src/dashboard.js) | `my-deland`, `deland-report`, `deland-` | Downloaded file names | Visible in residents' and staff's downloads folders. Use letters, digits, dots, hyphens or underscores. |
 | [vite.config.js](vite.config.js) | `deland-static-seo` | Build plugin name | |
 | [scripts/verify-sharing.mjs](scripts/verify-sharing.mjs) | `'fire-ems'` (line 14) | Sample cut id used by the share check script | Use an id that exists in your catalog |
 | [LICENSE](LICENSE) | Copyright line | MIT license | The MIT license requires keeping DeLand's notice; add your own copyright line for your changes |
 
 ---
 
-## 15. Tests that check DeLand's values
+## 15. How the tests follow your data
 
-Run `npm test` after each round of changes. The deployment build also runs the tests and stops if any fail. These tests assert DeLand's specific values and **will fail until you update them** to match your data:
+Run `npm test` after each round of changes. The deployment build also runs the tests and stops if any fail.
 
-| Test file | DeLand-specific checks | Update when you change |
-| --- | --- | --- |
-| [tests/cost-centers.test.js](tests/cost-centers.test.js) | 34 choices, 5 departments, 9 Parks and 8 Police choices, baseline `41.98788216`, Parks `5.05427165`, Police `17.01248098`, Sports Facilities `862368.60`, Field Operations `$10,893,432`, choice ids (`parks-sports-facilities`, `police-field-operations`, `parks-trailer-park`, `streets-signs`, `fire-ems` and others), catalog `fy26-27-6` and older versions, 6 revenue inputs, $290,000 per 0.1 mill, the $5.2M target, DeLand's web address | Budget data, revenue options, catalog version, target |
-| [tests/budget.test.js](tests/budget.test.js) | Baseline total `41.98788216`, `cutExamples` bands | Budget data |
-| [tests/budget-composition.test.js](tests/budget-composition.test.js) | "Fire Department: $6.28M", "$41.99M reduced" | Budget data, department names |
-| [tests/share-plan.test.js](tests/share-plan.test.js) | DeLand's web address, image version `v` = `8`, amounts `$33.0M`, `$8.99M`, `$17.01M deducted`, headline "Small city.", artwork size 960 by 576, file name `my-deland-postcard.png` | Budget data, headlines, artwork, `v` |
-| [tests/share-download.test.js](tests/share-download.test.js) | File names `my-deland-citrus-budget.png`, `my-deland-bluehour-budget.png` | Download names |
-| [tests/seo.test.js](tests/seo.test.js) | `seo.url` equals `https://amendment-3.delandfl.gov/`, social image file name, JPEG 1200 by 630 under 500 KB, FAQs on the page match the structured data | Web address, social image |
-| [tests/budget-meetings.test.js](tests/budget-meetings.test.js) | "City Commission" category, query format, 6 p.m. start | Meeting portal settings, or delete if you turn the lookup off |
-| [tests/dashboard-time.test.js](tests/dashboard-time.test.js) | Eastern standard and daylight time examples | Time zone |
-| [tests/dashboard.test.js](tests/dashboard.test.js) | Eastern day boundaries, "Submitted at (Eastern Time)" CSV heading, `deland_staff` cookie, millage amounts `2320000` and `2610000`, revenue ids `fire-fee` and `millage-rate` | Time zone, revenue options, cookie name |
-| [tests/reviewer-access.test.js](tests/reviewer-access.test.js) | `deland_reviewer` cookie, public asset paths | Cookie name, renamed launch files |
+The tests do not contain DeLand's figures. They read the same data and settings the site uses (the source rows, the catalog, `SERVICES`, `REDUCTION_TARGET_M`, `COST_CENTER_VERSION`, the revenue options, `seo`, `DASHBOARD_TIME_ZONE`, the meeting settings, the cookie names and the download names) and compare the code's results with totals and dates they work out separately, in whole cents and with the browser's own time-zone rules. So when you change the things this guide lists, the tests should keep passing with no edits. **A failing test means something in your data or code needs attention; fix that rather than the test.**
 
-[tests/analytics.test.js](tests/analytics.test.js) and [tests/video-ranges.test.js](tests/video-ranges.test.js) are not city-specific.
+### What they check
+
+| Test file | What it checks |
+| --- | --- |
+| [tests/cost-centers.test.js](tests/cost-centers.test.js) | Every source row is used in at most one choice; merged choices equal the sum of their rows; rows no choice uses (your exclusions) are left out of the baseline; department totals and the baseline add up in cents; choice ids are unique and safe in links; cuts, revenue and the millage rate add up exactly; the target is met exactly when cuts plus revenue reach `REDUCTION_TARGET_M`; share links keep the exact choices and reject other catalog versions; the builder's checkboxes and totals |
+| [tests/budget.test.js](tests/budget.test.js) | The baseline is the sum of the departments; service effects change at the 17%, 33.5% and 50% cut levels; money formatting |
+| [tests/budget-composition.test.js](tests/budget-composition.test.js) | The budget chart keeps cuts as empty space; every department has its own color |
+| [tests/share-plan.test.js](tests/share-plan.test.js) | Share links and image links keep every choice, reject bad or injected input, and redirect old links; preview images show the right totals for every department |
+| [tests/share-download.test.js](tests/share-download.test.js) | Saving the postcard on phones and computers, with the same file name on both |
+| [tests/seo.test.js](tests/seo.test.js) | `seo.url` is a clean HTTPS address; canonical and social tags, FAQs and structured data agree; robots and sitemap rules; the social image exists and is a JPEG, 1200 by 630, under 500 KB |
+| [tests/budget-meetings.test.js](tests/budget-meetings.test.js) | The portal query asks for your category on your dates; the matcher picks the meeting at `BUDGET_MEETING_START`, ignores test events and other boards, and links nothing when unsure; your schedule's dates are valid and in order |
+| [tests/dashboard-time.test.js](tests/dashboard-time.test.js) | Reporting days start at local midnight in `DASHBOARD_TIME_ZONE`; timestamps show local time; daylight saving days are 23 and 25 hours long |
+| [tests/dashboard.test.js](tests/dashboard.test.js) | The server recalculates every submission and ignores totals sent by the browser; retries, conflicts and limits; sign-in, sessions and staff roles; day boundaries in your time zone; CSV safety |
+| [tests/reviewer-access.test.js](tests/reviewer-access.test.js) | The reviewer gate, sign-in, session expiry and the public files allowed before sign-in |
+| [tests/analytics.test.js](tests/analytics.test.js), [tests/video-ranges.test.js](tests/video-ranges.test.js) | Analytics events and video seeking; not city-specific |
+
+### Tests that are skipped on purpose
+
+A skipped test is not a failure; `npm test` reports it as `# SKIP` with the reason.
+
+- Without a `millage-rate` revenue option, the three millage tests are skipped (see the code change in [section 8](#8-budget-data-and-math) under "The millage slider").
+- In a time zone without daylight saving time, the daylight saving test is skipped.
+- If [index.html](index.html) has no `data-meeting-date` schedule, the schedule test is skipped.
+- If your source rows do not each have their own `sourceCell`, the test that traces choices back to source rows is skipped.
+
+### Rules your data must still follow
+
+These are real limits of the code, so the tests enforce them:
+
+- Every department in `SERVICES` has at least one choice, a positive net total and exactly four `cutExamples`.
+- Every choice has a description (in `supplied` or `drafts`) and an id made of lowercase letters, digits and hyphens.
+- Cutting every choice must be enough to close the `REDUCTION_TARGET_M` gap.
+- `SERVICE_COLORS` in [src/budget-composition.js](src/budget-composition.js) needs one distinct color per department (six are provided).
+- `HEADLINES` in [src/postcard.js](src/postcard.js) has exactly three entries, because share links accept headline numbers 0 to 2.
+- Every department listed in [src/service-videos-data.js](src/service-videos-data.js) has a `tour-<id>` card in [index.html](index.html).
+- The reviewer and staff cookies have different names.
+- `DASHBOARD_TIME_ZONE` is less than 12 hours ahead of UTC, because calendar labels are drawn at noon UTC (every zone in the Americas qualifies).
+
+The tests also check a few fixed interface phrases that come from the code rather than from your content, such as "Cut selected", "Revenue added", "No funding remains", "deducted", "No change", "Meeting details" and "Watch recording". If you reword one of those in the code, update the matching line in the test.
 
 ---
 

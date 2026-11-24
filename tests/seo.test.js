@@ -21,7 +21,7 @@ test('production HTML has canonical, complete social metadata, and crawlable con
   assert.equal((html.match(/rel="canonical"/g) || []).length, 1);
   assert.ok(html.includes(`rel="canonical" href="${origin}"`));
   assert.ok(html.includes('index, follow, max-image-preview:large'));
-  assert.ok(html.includes(`content="${origin}assets/deland-explore-options-social.jpg"`));
+  assert.ok(html.includes(`content="${new URL(seo.image, origin).href}"`));
   assert.ok(html.includes('name="twitter:card" content="summary_large_image"'));
   assert.ok(!html.includes('<!-- seo:'));
   assert.ok(!/<button[^>]*data-goto=/.test(html));
@@ -68,7 +68,9 @@ test('preview stays noindex; production sitemap consolidates all shared plans to
 
 
 test('live domain and share image agree across metadata, schema, and sitemap', () => {
-  assert.equal(seo.url, 'https://amendment-3.delandfl.gov/');
+  // The configured address must already be in the normalized form production uses.
+  assert.equal(siteURL(seo.url), seo.url);
+  assert.match(seo.image, /^\/[^?#]+\.jpe?g$/i, 'seo.image is a site-relative JPEG path');
   const html = renderHead(seo.url, true);
   const imageURL = new URL(seo.image, seo.url).href;
   for (const key of ['og:image', 'twitter:image']) {

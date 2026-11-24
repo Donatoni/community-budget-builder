@@ -210,7 +210,7 @@ These details matter when you load your own budget.
 - **Catalog version.** `COST_CENTER_VERSION` in `src/cost-centers.js` is stored with every submission and share link. Change it whenever amounts or the meaning of an item change: older share links are then rejected instead of being reinterpreted with new numbers, and saved submissions keep their original snapshot.
 - **Interpreting results.** Submissions are plans, not unique residents and not a representative poll. Averages include plans with no cuts to a department; cut frequencies do not sum to 100% because one plan has many cuts. More in [docs/staff-dashboard.md](docs/staff-dashboard.md#collection-and-interpretation).
 
-`npm test` checks the catalog totals, exclusions, revenue math and share links. Many of these tests assert DeLand's specific figures and URL, so update them together with your data (see [CUSTOMIZING.md](CUSTOMIZING.md#15-tests-that-check-delands-values)); the Cloudflare build runs the tests and stops if any fail.
+`npm test` checks the catalog totals, exclusions, revenue math and share links. The tests read the same data and settings as the site rather than DeLand's figures, so they keep passing when you load your own data, and a failure points to a real problem (see [CUSTOMIZING.md](CUSTOMIZING.md#15-how-the-tests-follow-your-data)). The Cloudflare build runs the tests and stops if any fail.
 
 ## Data handling
 

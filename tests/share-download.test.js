@@ -4,6 +4,8 @@ import { downloadCard } from '../src/share.js';
 
 const file = new File(['png fixture'], 'postcard.png', { type: 'image/png' });
 const canvas = { toDataURL: () => 'data:image/png;base64,cG5n' };
+// Download names start with a city prefix set in src/share.js, then the chosen suffix.
+const savedName = suffix => new RegExp(`^[\\w.-]+-${suffix}\\.png$`);
 
 function browser(t, navigator, document) {
   for (const [key, value] of Object.entries({ navigator, document })) {
@@ -35,7 +37,7 @@ test('mobile save hands off only the selected PNG before user activation expires
   const pending = downloadCard(canvas, 'citrus-budget', file);
   assert.ok(call, 'The native share call must happen before yielding');
   assert.deepEqual(Object.keys(call), ['files']);
-  assert.equal(call.files[0].name, 'my-deland-citrus-budget.png');
+  assert.match(call.files[0].name, savedName('citrus-budget'));
   assert.equal(call.files[0].type, 'image/png');
   assert.equal(await call.files[0].text(), await file.text());
   assert.equal(await pending, 'shared-image');
@@ -62,7 +64,19 @@ test('desktop save downloads the selected canvas with the chosen filename and cl
     body: { append: element => { assert.equal(element, link); events.push('append'); } },
   });
   assert.equal(await downloadCard(canvas, 'bluehour-budget', file), 'download');
-  assert.equal(link.download, 'my-deland-bluehour-budget.png');
+  assert.match(link.download, savedName('bluehour-budget'));
   assert.equal(link.href, canvas.toDataURL());
   assert.deepEqual(events, ['append', 'click', 'remove']);
+});
+
+test('mobile sharing and desktop downloads give the saved image the same file name', async t => {
+  const link = { click() {}, remove() {} };
+  const navigator = { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X)', platform: 'MacIntel', maxTouchPoints: 0 };
+  browser(t, navigator, { createElement: () => link, body: { append() {} } });
+  assert.equal(await downloadCard(canvas, 'daylight-budget', file), 'download');
+  let shared;
+  Object.assign(navigator, { userAgent: 'iPhone', canShare: () => true, share: data => { shared = data.files[0]; return Promise.resolve(); } });
+  assert.equal(await downloadCard(canvas, 'daylight-budget', file), 'shared-image');
+  assert.equal(shared.name, link.download);
+  assert.match(shared.name, savedName('daylight-budget'));
 });

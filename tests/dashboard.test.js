@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { localDatabase } from '../server/dashboard-local.js';
 import { handleDashboardRequest, validateSubmission, dateRange } from '../server/dashboard-api.js';
 import { dashboardStore } from '../server/dashboard-store.js';
-import { authenticateStaff, staffCookie, staffSession, hashPassword } from '../server/staff-auth.js';
+import { authenticateStaff, staffCookie, clearStaffCookie, staffSession, hashPassword } from '../server/staff-auth.js';
 import { reviewerGate } from '../server/reviewer-access.js';
-import { ALL_COST_CENTERS, COST_CENTER_VERSION } from '../src/cost-centers.js';
+import { ALL_COST_CENTERS, COST_CENTER_VERSION, POTENTIAL_REVENUES } from '../src/cost-centers.js';
 import { SERVICES } from '../src/budget.js';
 import { summarizeSubmissions, submissionsCSV, csvCell } from '../src/dashboard-data.js';
+import { dashboardDate } from '../src/dashboard-time.js';
+import { cents, sumCents, TARGET_CENTS, MILLAGE, CHECKBOX_REVENUES, noMillage, noRevenues, revenueCents, cutsReaching, LARGEST_FIRST } from './support/catalog.js';
+import { localDay, localMidnight } from './support/time-zone.js';
 
 const origin = 'https://budget.example.gov';
 const request = (path, method = 'GET', body, cookie, extra = {}) => new Request(origin + path, { method, headers: { Origin: origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}), ...extra }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -22,6 +25,9 @@ async function cookieFor(env, email = env.ADMIN_EMAIL, password = env.ADMIN_PASS
   return (await staffCookie(request('/'), user, env)).split(';')[0];
 }
 const plan = () => ({ id: crypto.randomUUID(), costCenterVersion: COST_CENTER_VERSION, cuts: ALL_COST_CENTERS.map(cut => cut.id) });
+const cutCents = ids => sumCents(ALL_COST_CENTERS.filter(cut => ids.includes(cut.id)).map(cut => cut.savings));
+// The cookie name is whatever server/staff-auth.js sets.
+const STAFF_COOKIE = clearStaffCookie(new Request(origin)).split('=')[0];
 const call = (env, cookie, path, method, body) => handleDashboardRequest(request(path, method, body, cookie), env);
 async function addUser(env, cookie, role = 'viewer', email = 'staff@example.gov') {
   const response = await call(env, cookie, '/api/admin/users', 'POST', { name: 'City colleague', email, role, password: 'test-colleague-password' });
@@ -31,7 +37,7 @@ async function addUser(env, cookie, role = 'viewer', email = 'staff@example.gov'
 
 test('submissions recompute snapshots, validate catalogs and targets, and deduplicate retries', async t => {
   const env = environment(t);
-  const payload = { ...plan(), submittedAt: '1999-01-01', reduction: -1, budget: { parks: -10 }, illustrative: false };
+  const payload = { ...plan(), submittedAt: '1999-01-01', reduction: -1, revenue: 99999999, gapClosed: 99999999, budget: Object.fromEntries(SERVICES.map(service => [service.id, -10])), illustrative: true };
   const first = await call(env, null, '/api/submissions', 'POST', payload);
   assert.equal(first.status, 201);
   assert.equal((await call(env, null, '/api/submissions', 'POST', payload)).status, 201);
@@ -41,54 +47,72 @@ test('submissions recompute snapshots, validate catalogs and targets, and dedupl
   assert.equal(summary.count, 1);
   const row = submissions[0];
   assert.equal(row.illustrative, false);
-  assert.equal(row.reduction, ALL_COST_CENTERS.reduce((sum, cut) => sum + Math.round(cut.savings * 100), 0) / 100);
+  assert.equal(row.revenue, 0);
+  assert.equal(row.gapClosed, row.reduction);
+  assert.equal(row.reduction, cutCents(payload.cuts) / 100);
   assert.ok(row.submittedAt.startsWith(new Date().toISOString().slice(0, 10)));
-  assert.equal(row.budget.parks, 0);
-  assert.equal(row.cuts[0].impact, ALL_COST_CENTERS[0].impact);
-  assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, cuts: payload.cuts.slice(1) })).status, 409);
-  for (const changed of [{ id: 'invalid' }, { cuts: ['unknown'] }, { cuts: [ALL_COST_CENTERS[0].id] }, { cuts: [...payload.cuts, payload.cuts[0]] }]) assert.throws(() => validateSubmission({ ...payload, ...changed }));
+  assert.deepEqual(row.budget, Object.fromEntries(SERVICES.map(service => [service.id, 0])));
+  assert.deepEqual(row.cuts.map(cut => [cut.id, cut.savings, cut.impact]), ALL_COST_CENTERS.map(cut => [cut.id, cut.savings, cut.impact]));
+  // A different plan that also meets the target cannot reuse the identifier.
+  const other = cutsReaching();
+  assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, cuts: other })).status, 409);
+  for (const changed of [{ id: 'invalid' }, { cuts: ['unknown'] }, { cuts: [] }, { cuts: other.slice(0, -1) }, { cuts: [...payload.cuts, payload.cuts[0]] }, { cuts: 'all' }]) assert.throws(() => validateSubmission({ ...payload, ...changed }));
   assert.throws(() => validateSubmission({ ...payload, costCenterVersion: 'old' }), /catalog has changed/);
 });
 
-test('revenue-only submissions are validated, saved, reported and exported', async t => {
+test('revenue submissions are recomputed, saved, reported and exported', { skip: noRevenues }, async t => {
   const env = environment(t);
-  const payload = { ...plan(), cuts: [], revenues: ['fire-fee', 'millage-rate'], revenue: 1, gapClosed: 1 };
+  const revenues = POTENTIAL_REVENUES.map(item => item.id);
+  const revenue = revenueCents(revenues);
+  // Revenue alone when it closes the gap, otherwise the fewest large cuts that finish the job.
+  const cuts = revenue >= TARGET_CENTS ? [] : cutsReaching(revenue);
+  const payload = { ...plan(), cuts, revenues, revenue: 1, gapClosed: 1 };
   assert.equal((await call(env, null, '/api/submissions', 'POST', payload)).status, 201);
   assert.equal((await call(env, null, '/api/submissions', 'POST', payload)).status, 201);
   const response = await call(env, await cookieFor(env), '/api/admin/submissions');
   const { submissions: [row], summary } = await response.json();
-  assert.equal(row.reduction, 0);
-  assert.equal(row.revenue, 5900000);
-  assert.equal(row.gapClosed, 5900000);
-  assert.equal(row.revenues.length, 2);
-  assert.equal(summary.averageRevenue, 5900000);
-  assert.equal(summary.averageGapClosed, 5900000);
-  assert.equal(summary.revenues[0].count, 1);
-  assert.match(submissionsCSV([row]), /Establish Fire Fee/);
-  assert.match(submissionsCSV([row]), /5900000/);
-  for (const revenues of [[], ['unknown'], ['fire-fee'], ['fire-fee', 'fire-fee'], 'fire-fee']) {
-    assert.throws(() => validateSubmission({ ...payload, revenues }));
+  assert.equal(row.reduction, cutCents(cuts) / 100);
+  assert.equal(row.revenue, revenue / 100);
+  assert.equal(row.gapClosed, (cutCents(cuts) + revenue) / 100);
+  assert.deepEqual(row.revenues.map(item => item.id), revenues);
+  assert.equal(summary.averageRevenue, revenue / 100);
+  assert.equal(summary.averageGapClosed, row.gapClosed);
+  assert.equal(summary.revenues.length, revenues.length);
+  assert.ok(summary.revenues.every(item => item.count === 1));
+  const csv = submissionsCSV([row]);
+  for (const item of row.revenues) assert.ok(csv.includes(item.name.replaceAll('"', '""')), item.name);
+  assert.ok(csv.includes(`"${revenue / 100}"`));
+  for (const invalid of [['unknown'], [revenues[0], revenues[0]], revenues[0], [...revenues, 'unknown']]) {
+    assert.throws(() => validateSubmission({ ...payload, revenues: invalid }), JSON.stringify(invalid));
   }
-  assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, revenues: [...payload.revenues, 'planning-fees'] })).status, 409);
+  if (revenue < TARGET_CENTS) assert.throws(() => validateSubmission({ ...payload, cuts: [] }));
+  const extra = LARGEST_FIRST.find(cut => !cuts.includes(cut.id));
+  if (extra) assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, cuts: [...cuts, extra.id] })).status, 409);
 });
 
-test('partial millage is recomputed, stored, and reported at its selected rate', async t => {
+test('partial millage is recomputed, stored, and reported at its selected rate', { skip: noMillage }, async t => {
   const env = environment(t);
-  const payload = { ...plan(), cuts: [], revenues: ['fire-fee', 'millage-rate'], millageRate: 0.8, revenue: 99999999 };
+  const revenues = [CHECKBOX_REVENUES[0]?.id, MILLAGE.id].filter(Boolean);
+  const at = tenths => revenueCents(revenues, tenths);
+  const cuts = at(8) >= TARGET_CENTS ? [] : cutsReaching(at(8));
+  const payload = { ...plan(), cuts, revenues, millageRate: 0.8, revenue: 99999999 };
   assert.equal((await call(env, null, '/api/submissions', 'POST', payload)).status, 201);
   assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, millageRate: 0.9 })).status, 409);
   assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, id: crypto.randomUUID(), millageRate: 0.9 })).status, 201);
   const data = await (await call(env, await cookieFor(env), '/api/admin/submissions')).json();
   const saved = data.submissions.find(row => row.id === payload.id);
-  assert.equal(saved.revenue, 5320000);
+  assert.equal(saved.revenue, at(8) / 100);
   assert.equal(saved.millageRate, 0.8);
-  assert.equal(saved.revenues.find(item => item.id === 'millage-rate').amount, 2320000);
-  assert.deepEqual(data.summary.revenues.filter(item => item.id === 'millage-rate').map(item => item.amount).sort((a,b) => a-b), [2320000, 2610000]);
-  assert.match(submissionsCSV([saved]), /0.8 mills/);
-  for (const millageRate of [-0.1, 1.1, 0.15, '0.8', null, 0, 0.7]) {
-    assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, id: crypto.randomUUID(), millageRate })).status, 400);
+  assert.equal(saved.revenues.find(item => item.id === MILLAGE.id).amount, revenueCents([MILLAGE.id], 8) / 100);
+  assert.deepEqual(data.summary.revenues.filter(item => item.id === MILLAGE.id).map(item => item.amount).sort((a, b) => a - b), [8, 9].map(tenths => revenueCents([MILLAGE.id], tenths) / 100));
+  assert.match(submissionsCSV([saved]), /0\.8 mills/);
+  for (const millageRate of [-0.1, 1.1, 0.15, '0.8', null, 0]) {
+    assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, id: crypto.randomUUID(), millageRate })).status, 400, String(millageRate));
   }
-  assert.equal((await call(env, null, '/api/submissions', 'POST', { ...plan(), cuts: ['parks-trailer-park'] })).status, 400);
+  // A rate that leaves the plan short of the target is refused.
+  const shortRate = [0, 1, 2, 3, 4, 5, 6, 7].reverse().find(tenths => tenths && cutCents(cuts) + at(tenths) < TARGET_CENTS);
+  if (shortRate) assert.equal((await call(env, null, '/api/submissions', 'POST', { ...payload, id: crypto.randomUUID(), millageRate: shortRate / 10 })).status, 400);
+  assert.equal((await call(env, null, '/api/submissions', 'POST', { ...plan(), cuts: ['not-a-choice'] })).status, 400);
 });
 
 test('staff login integrates with gate without granting reviewer access to staff data', async t => {
@@ -97,11 +121,14 @@ test('staff login integrates with gate without granting reviewer access to staff
   const signIn = username => reviewerGate(new Request(origin + '/auth/login', { method: 'POST', headers: { Origin: origin, Accept: 'application/json', 'CF-Connecting-IP': username }, body: new URLSearchParams({ username, password: username === env.ADMIN_EMAIL ? env.ADMIN_PASSWORD : env.REVIEWER_PASSWORD, next: '/admin/' }) }), env, loadPage);
   const loggedIn = await signIn(env.ADMIN_EMAIL);
   assert.equal(loggedIn.status, 200);
-  assert.match(loggedIn.headers.get('Set-Cookie'), /deland_staff=.*HttpOnly.*Secure/);
+  assert.ok(STAFF_COOKIE, 'the staff cookie has a name');
+  assert.ok(loggedIn.headers.get('Set-Cookie').startsWith(`${STAFF_COOKIE}=`));
+  assert.match(loggedIn.headers.get('Set-Cookie'), /HttpOnly.*Secure/);
   const adminCookie = loggedIn.headers.get('Set-Cookie').split(';')[0];
   assert.equal(await reviewerGate(request('/admin/', 'GET', undefined, adminCookie), env, loadPage), null);
   const reviewer = await signIn('reviewer');
   const reviewerCookie = reviewer.headers.get('Set-Cookie').split(';')[0];
+  assert.notEqual(reviewerCookie.split('=')[0], STAFF_COOKIE, 'reviewer and staff sessions need different cookie names');
   assert.equal((await reviewerGate(request('/admin/', 'GET', undefined, reviewerCookie), env, loadPage)).status, 303);
   assert.equal(await (await reviewerGate(request('/login?next=%2Fadmin%2F&staff=1', 'GET', undefined, reviewerCookie), env, loadPage)).text(), 'login.html');
   assert.equal((await call(env, reviewerCookie, '/api/admin/submissions')).status, 401);
@@ -164,10 +191,12 @@ test('API rejects cross-origin, malformed, excessive and unconfigured requests',
   assert.match(privateResponse.headers.get('X-Robots-Tag'), /noindex/);
 });
 
-test('date boundaries include complete Eastern days for submissions and feedback and reject invalid ranges', async t => {
+test('date boundaries include complete local days for submissions and feedback and reject invalid ranges', async t => {
   const env = environment(t), cookie = await cookieFor(env);
   const store = dashboardStore(env);
-  const timestamps = ['2026-09-01T03:59:59.999Z', '2026-09-01T04:00:00.000Z', '2026-10-01T03:59:59.999Z', '2026-10-01T04:00:00.000Z'];
+  // One millisecond either side of local midnight at the start and end of September.
+  const start = localMidnight('2026-09-01'), end = localMidnight('2026-10-01');
+  const timestamps = [start - 1, start, end - 1, end].map(instant => new Date(instant).toISOString());
   for (const submitted_at of timestamps) {
     await store.createSubmission({ ...validateSubmission(plan()), submitted_at });
     await store.createFeedback({ id: crypto.randomUUID(), submitted_at, helpful: 'yes', comment: '' });
@@ -194,12 +223,16 @@ test('analytics include zero-cut departments, median, frequency, and separate ca
   assert.equal(summary.reviewed, 1);
   assert.equal(summary.averageReduction, 300);
   assert.equal(summary.medianReduction, 300);
-  assert.equal(summary.departments[0].average, cut.savings * 2 / 3);
-  assert.equal(summary.departments[0].selections, 2);
-  assert.equal(summary.departments[1].average, 0);
+  assert.equal(summary.departments.length, SERVICES.length);
+  for (const department of summary.departments) {
+    const chosen = department.id === cut.serviceId;
+    assert.equal(department.average, chosen ? cut.savings * 2 / 3 : 0, department.id);
+    assert.equal(department.selections, chosen ? 2 : 0, department.id);
+  }
   assert.equal(summary.cuts.length, 2);
   assert.equal(summary.cuts[0].count, 1);
-  assert.deepEqual(summary.days, [{ date: '2026-09-01', count: 3 }]);
+  const days = Object.entries(Object.groupBy(rows, row => localDay(row.submittedAt))).map(([date, group]) => ({ date, count: group.length })).sort((a, b) => a.date.localeCompare(b.date));
+  assert.deepEqual(summary.days, days);
   assert.equal(summarizeSubmissions(rows.slice(0, 2)).medianReduction, 200);
   assert.equal(summarizeSubmissions([]).averageReduction, 0);
 });
@@ -208,9 +241,15 @@ test('CSV retains dollars and neutralizes spreadsheet formulas and embedded quot
   assert.equal(csvCell('=SUM(A1:A2)'), '"\'=SUM(A1:A2)"');
   assert.equal(csvCell('\t@BAD'), '"\'\t@BAD"');
   assert.equal(csvCell('A "quote"'), '"A ""quote"""');
-  const csv = submissionsCSV([{ id: 'id', submittedAt: '2026-09-02T01:30:00Z', status: 'new', catalogVersion: 'demo-1', illustrative: true, reduction: 5200000, cuts: [{ name: '=malicious' }], budget: Object.fromEntries(SERVICES.map(service => [service.id, 1.25])) }]);
-  assert.ok(csv.includes('Submitted at (Eastern Time)'));
-  assert.ok(csv.includes('Sep 1, 2026, 09:30:00 PM EDT'));
+  const submittedAt = '2026-09-02T01:30:00Z';
+  const csv = submissionsCSV([{ id: 'id', submittedAt, status: 'new', catalogVersion: 'demo-1', illustrative: true, reduction: 5200000, cuts: [{ name: '=malicious' }], budget: Object.fromEntries(SERVICES.map(service => [service.id, 1.25])) }]);
+  assert.ok(csv.startsWith('\ufeff'));
+  const [header, line] = csv.slice(1).split('\r\n').map(text => [...text.matchAll(/"((?:[^"]|"")*)"/g)].map(match => match[1]));
+  assert.equal(header.length, 10 + SERVICES.length);
+  assert.equal(line.length, header.length);
+  SERVICES.forEach((service, i) => assert.ok(header[10 + i].includes(service.name.replaceAll('"', '""')), service.name));
+  // The timestamp is shown on the local calendar date of the configured zone.
+  assert.ok(line[1].startsWith(`${dashboardDate(localDay(submittedAt), { year: 'numeric' })}, `), line[1]);
   assert.ok(csv.includes('"5200000"'));
   assert.ok(csv.includes('"1250000"'));
   assert.ok(csv.includes('"\'=malicious"'));

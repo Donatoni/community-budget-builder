@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reviewerGate } from '../server/reviewer-access.js';
+import { reviewerGate, publicAssets } from '../server/reviewer-access.js';
 import { onRequest as middleware } from '../functions/_middleware.js';
 
 const origin = 'https://budget.example.gov';
@@ -17,6 +17,8 @@ async function signIn() {
   assert.equal(response.status, 200);
   return response.headers.get('Set-Cookie').split(';')[0];
 }
+// The cookie name is whatever server/reviewer-access.js sets.
+const cookieName = async () => (await signIn()).split('=')[0];
 
 test('unauthenticated root and aliases show only the coming-soon page; private paths require login', async () => {
   for (const path of ['/', '/index', '/index.html', '/?cuts=fire-coverage', '/coming-soon']) {
@@ -24,14 +26,16 @@ test('unauthenticated root and aliases show only the coming-soon page; private p
     assert.equal(await response.text(), 'coming-soon.html');
     assert.match(response.headers.get('Cache-Control'), /no-store/);
   }
-  for (const path of ['/share/', '/share/image.png', '/assets/videos/police_safety.mp4', '/src/main.js', '/assets/index-app.js']) {
+  for (const path of ['/share/', '/share/image.png', '/assets/videos/example.mp4', '/src/main.js', '/assets/index-app.js']) {
     const response = await gate(path);
     assert.equal(response.status, 303, path);
     assert.match(response.headers.get('Location'), /^\/login\?/);
   }
   assert.equal((await gate('/api/feedback')).status, 401);
   assert.equal(await (await gate('/login')).text(), 'login.html');
-  assert.equal(await gate('/assets/launch.css'), null);
+  assert.ok(publicAssets.size > 0);
+  for (const path of publicAssets) assert.equal(await gate(path), null, path);
+  assert.equal((await reviewerGate(new Request(origin + [...publicAssets][0], { method: 'POST' }), env, loadPage)).status, 401);
 });
 
 test('privacy notice is readable without sign-in while neighboring routes remain protected', async () => {
@@ -45,7 +49,7 @@ test('privacy notice is readable without sign-in while neighboring routes remain
     const post = await reviewerGate(new Request(origin + path, { method: 'POST' }), {}, loadPage);
     assert.equal(post.status, 405);
   }
-  assert.equal(await gate('/assets/privacy.css', {}, {}), null);
+  for (const path of publicAssets) assert.equal(await gate(path, {}, {}), null, path);
   for (const path of ['/privacy/admin', '/privacy-export', '/admin/']) {
     assert.equal((await gate(path)).status, 303);
   }
@@ -78,7 +82,7 @@ test('valid credentials create a secure HTTP-only session; invalid credentials a
 
 test('session forgery, expiration, password rotation, and secret rotation deny access', async () => {
   const cookie = await signIn();
-  for (const candidate of ['deland_reviewer=forged', cookie + 'x', cookie + '.extra']) {
+  for (const candidate of [`${await cookieName()}=forged`, cookie + 'x', cookie + '.extra']) {
     assert.equal(await (await gate('/', { Cookie: candidate })).text(), 'coming-soon.html');
   }
   for (const config of [{ ...env, REVIEWER_PASSWORD: 'changed' }, { ...env, REVIEWER_SESSION_SECRET: 'another-signing-key-with-32-characters' }]) {
@@ -92,7 +96,7 @@ test('session forgery, expiration, password rotation, and secret rotation deny a
 });
 
 test('footer session status distinguishes anonymous visitors, reviewers, and staff without exposing account details', async () => {
-  for (const cookie of [undefined, 'deland_reviewer=forged']) {
+  for (const cookie of [undefined, `${await cookieName()}=forged`]) {
     const response = await gate('/auth/session', cookie ? { Cookie: cookie } : {});
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { authenticated: false });
