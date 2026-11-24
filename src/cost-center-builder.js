@@ -73,7 +73,7 @@ export function initRevenueBuilder(container, selected, onChange, adjustment = {
     else selected.delete(event.target.value);
     onChange();
   });
-  container.querySelector('#revenue-millage-rate').addEventListener('input', event => {
+  container.querySelector('#revenue-millage-rate')?.addEventListener('input', event => {
     adjustment.millageRate = Number(event.target.value);
     if (adjustment.millageRate > 0) selected.add('millage-rate');
     else selected.delete('millage-rate');
@@ -82,12 +82,14 @@ export function initRevenueBuilder(container, selected, onChange, adjustment = {
   return () => {
     const rate = selected.has('millage-rate') ? adjustment.millageRate : 0;
     const slider = container.querySelector('#revenue-millage-rate');
-    slider.value = String(rate);
-    slider.style.setProperty('--range-progress', `${rate * 100}%`);
-    slider.setAttribute('aria-valuetext', `${rate.toFixed(1)} ${rate === 1 ? 'mill' : 'mills'} increase, ${fmtUSD(POTENTIAL_REVENUES.find(item => item.id === 'millage-rate').amount * rate)} estimated annual revenue`);
-    container.querySelector('#millage-rate-value').textContent = `+${rate.toFixed(1)} ${rate === 1 ? 'mill' : 'mills'}`;
-    container.querySelector('#millage-revenue-amount').textContent = `+${fmtUSD(POTENTIAL_REVENUES.find(item => item.id === 'millage-rate').amount * rate)}`;
-    container.querySelector('.millage-choice').classList.toggle('is-selected', rate > 0);
+    if (slider) { // Sites without a millage option have no slider.
+      slider.value = String(rate);
+      slider.style.setProperty('--range-progress', `${rate * 100}%`);
+      slider.setAttribute('aria-valuetext', `${rate.toFixed(1)} ${rate === 1 ? 'mill' : 'mills'} increase, ${fmtUSD(POTENTIAL_REVENUES.find(item => item.id === 'millage-rate').amount * rate)} estimated annual revenue`);
+      container.querySelector('#millage-rate-value').textContent = `+${rate.toFixed(1)} ${rate === 1 ? 'mill' : 'mills'}`;
+      container.querySelector('#millage-revenue-amount').textContent = `+${fmtUSD(POTENTIAL_REVENUES.find(item => item.id === 'millage-rate').amount * rate)}`;
+      container.querySelector('.millage-choice').classList.toggle('is-selected', rate > 0);
+    }
     container.querySelectorAll('input[type="checkbox"]').forEach(input => {
       input.checked = selected.has(input.value);
       const label = input.closest('label');
