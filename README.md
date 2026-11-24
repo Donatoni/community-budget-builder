@@ -233,4 +233,6 @@ These details matter when you load your own budget.
 
 The code is released under the [MIT License](LICENSE). The license covers the software; it does not grant rights to the City of DeLand's name, seal, photographs, videos or other content included as the example, which you must replace.
 
-This project is provided as is, without warranty of any kind. The City of DeLand does not offer support, maintenance, hosting or security updates for copies run by other organizations. Review the code, test it with your own data, and have your own staff or contractor maintain your deployment.
+This project is provided as is, without warranty of any kind. Each organization hosts, maintains and secures its own copy, so review the code, test it with your own data, and have your own staff or contractor look after your deployment.
+
+Questions from other local governments are welcome: open an issue on this repository, or contact the City of DeLand directly. We are glad to help where we can, although we cannot promise ongoing support or updates.
