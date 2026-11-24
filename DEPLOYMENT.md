@@ -40,7 +40,7 @@ Throughout, `your-city-budget` stands for your Pages project name and `budget.ex
 - **Node.js 22.13 or later** and npm. Earlier versions lack the built-in `node:sqlite` module that the local dev server and the test suite use, and the Cloudflare build runs the tests.
 - **Python 3** (standard library only). The build runs `scripts/prepare-cloudflare.py` to shrink videos that are too large for Pages.
 - **FFmpeg** is not a separate install. The `ffmpeg-static` npm package downloads an FFmpeg binary during `npm ci`, and the build points the video script at it. Set `FFMPEG` only if you want to use a different binary.
-- **Wrangler**, Cloudflare's CLI, is a dev dependency (version 4.131.2). Run it with `npx wrangler`; no global install is needed.
+- **Wrangler**, Cloudflare's CLI, is a dev dependency (version 4.168.0). Run it with `npx wrangler`; no global install is needed.
 - **Your content.** Work through [CUSTOMIZING.md](CUSTOMIZING.md) before launch. You can deploy DeLand's example content first to test the setup, as long as the site stays in coming-soon mode.
 
 Install dependencies once:

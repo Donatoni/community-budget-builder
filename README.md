@@ -59,7 +59,7 @@ Versions are from [`package.json`](package.json).
 | [jsPDF](https://github.com/parallax/jsPDF) 4.2 and jspdf-autotable 5.0 | Dashboard PDF reports, generated in the browser |
 | [Resvg WASM](https://github.com/yisibl/resvg-js) 2.6 | Server-side rendering of personalized share images |
 | [linkedom](https://github.com/WebReflection/linkedom) 0.18 | HTML parsing in the test suite |
-| [Wrangler](https://developers.cloudflare.com/workers/wrangler/) 4.131 | Cloudflare CLI: D1, secrets, local Pages runtime, manual deploys |
+| [Wrangler](https://developers.cloudflare.com/workers/wrangler/) 4.168 | Cloudflare CLI: D1, secrets, local Pages runtime, manual deploys |
 | ffmpeg-static 5.3 | Supplies the FFmpeg binary used to shrink oversized videos at deploy time |
 | `node:test` | Test runner (no extra framework) |
 

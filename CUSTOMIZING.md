@@ -56,7 +56,6 @@ Notes:
 
 - `aria-label` attributes on the wordmark links also contain the city name (for example `aria-label="City of DeLand ...`). They are read aloud by screen readers, so change them too.
 - Taglines and slogans you will probably want to rewrite: "A city we share. A future we shape." ([index.html](index.html) line 116), "YOUR CITY. YOUR PERSPECTIVE." (line 86), "Your city. Your choices. Our future." ([public/coming-soon.html](public/coming-soon.html) and [public/login.html](public/login.html) footer), "Small city. Shared possibilities." (coming-soon caption).
-- The coming-soon page lists "See your savings" as an upcoming feature. The household savings calculator was later removed, so you may want to change that line.
 
 ### JavaScript strings
 
@@ -121,15 +120,14 @@ This page is written around Florida public records law and DeLand's own policies
 
 | Line | What | Search for |
 | --- | --- | --- |
-| 8 | Meta description (still mentions "property searches", which the site no longer has) | `property searches` |
+| 8 | Meta description | `name="description"` |
 | 30 | "Last updated" date (both the visible text and `datetime`) | `privacy-date` |
 | 43 | Paragraph about the CivicClerk meeting portal (see [section 9](#9-public-meetings-civicclerk)) | `CivicClerk` |
 | 48 | Hosting provider (Cloudflare) | `hosted by Cloudflare` |
 | 50 | Link to the city's general privacy policy | `deland.org/privacy` |
-| 55 | Paragraph about Google Analytics (see [section 13](#13-add-your-own-analytics)) | `Google Analytics` |
-| 67 | Florida records retention wording | `Florida public-records` |
-| 68 | City Clerk contact: public records page link, phone number (`tel:+13866267130`, shown as `386-626-7130`) and mailing address (`120 S Florida Avenue, DeLand, FL 32720`) | `Public-Records-Request`, `386-626-7130` |
-| 79 | Footer: city name and city privacy policy link | `launch-footer` |
+| 66 | Florida records retention wording | `Florida public-records` |
+| 67 | City Clerk contact: public records page link, phone number (`tel:+13866267130`, shown as `386-626-7130`) and mailing address (`120 S Florida Avenue, DeLand, FL 32720`) | `Public-Records-Request`, `386-626-7130` |
+| 78 | Footer: city name and city privacy policy link | `launch-footer` |
 
 ### Other contact details and legal notices
 
@@ -297,8 +295,8 @@ When a plan link is shared, [functions/share/index.js](functions/share/index.js)
 
 ### [package.json](package.json)
 
-- `name`: `build-your-deland`
-- `description`: mentions DeLand and the property tax savings calculator (which the page no longer has)
+- `name`: `community-budget-builder` (rename it for your project if you like)
+- `description`: credits the City of DeLand; reword it for your site
 
 - [ ] `seo` object, FAQs, structured data, place name and sources updated
 - [ ] Both review dates updated
@@ -526,7 +524,7 @@ Notes:
 - The files in `public/` are copied to the site as they are; `index.html` and `admin/index.html` are processed by the build. An ordinary inline `<script>` tag works in both.
 - The site sends no Content Security Policy header, so no header change is needed to load an analytics script.
 - **Budget challenge funnel events.** [src/analytics.js](src/analytics.js) (`createChallengeTracker()`) sends three events through `window.gtag` **if it exists**, and does nothing if it does not: `challenge_start` (the first time a resident checks a cut, a revenue option or moves the millage slider), `challenge_target_met` (the gap is closed, only after a start) and `challenge_submit` (the plan is saved). Each is sent at most once per page load, as `gtag('event', name)` with no extra details, and a later step also sends any earlier step that was skipped, so the counts always go start, then target met, then submit. If you use Google Analytics, these appear automatically. If you use another tool, either define a small `window.gtag` function that forwards to it, or change the default `send` argument of `createChallengeTracker()`.
-- Update the paragraph about Google Analytics in [public/privacy.html](public/privacy.html) (line 55, section `#browser-storage`) so it describes what you actually use, or remove it if you use none.
+- The privacy page says nothing about analytics. If you add a tag, add a paragraph to [public/privacy.html](public/privacy.html) (section `#browser-storage`) that names the tool and explains what it collects.
 
 - [ ] Analytics tag added to the pages you want to measure (or deliberately left out)
 - [ ] Privacy page paragraph matches
