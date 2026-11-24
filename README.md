@@ -6,6 +6,8 @@ The site was built by the **City of DeLand, Florida** for Florida's 2026 propert
 
 **Live example:** [amendment-3.delandfl.gov](https://amendment-3.delandfl.gov)
 
+**Screenshot:** [the full home page, as built from this code](docs/screenshot-home.jpg) (captured November 24, 2026; a large image).
+
 ## Start here
 
 | Step | Guide |
